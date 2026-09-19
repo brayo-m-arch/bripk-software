@@ -334,6 +334,7 @@
   var schoolsList = [];     // super admin: all schools
   var teachersList = [];    // admin/teacher: teachers in the current school
   var assignmentsList = []; // admin/teacher: assignments in the current school
+  var examHistory = [];     // admin: past exam names used by this school, newest first
   var currentGrade = "7";
   var currentTab = null;
   var classCache = { subjects: [], students: [], marks: {} };
@@ -423,7 +424,7 @@
   async function doLogout(){
     try{ await sb.auth.signOut(); } catch(e){}
     authUser = null; profile = null; currentSchool = null;
-    schoolsList = []; teachersList = []; assignmentsList = [];
+    schoolsList = []; teachersList = []; assignmentsList = []; examHistory = [];
     document.getElementById("content").innerHTML = "";
     document.getElementById("tabs").innerHTML = "";
     document.getElementById("metaStrip").innerHTML = "";
@@ -434,9 +435,20 @@
     if(!currentSchool) return;
     var teachersQ = sb.from("profiles").select("id, full_name, email").eq("school_id", currentSchool.id).eq("role","teacher").order("full_name");
     var assignQ = sb.from("assignments").select("*").eq("school_id", currentSchool.id);
-    var results = await Promise.all([teachersQ, assignQ]);
+    var examsQ = sb.from("exams").select("*").eq("school_id", currentSchool.id).order("created_at", { ascending:false });
+    var results = await Promise.all([teachersQ, assignQ, examsQ]);
     teachersList = results[0].data || [];
     assignmentsList = results[1].data || [];
+    examHistory = results[2].data || [];
+  }
+
+  async function rememberExamName(name){
+    name = (name || "").trim();
+    if(!name || !currentSchool) return;
+    var already = examHistory.some(function(e){ return e.name.toLowerCase() === name.toLowerCase(); });
+    if(already) return;
+    var res = await sb.from("exams").insert({ school_id: currentSchool.id, name: name }).select().single();
+    if(!res.error && res.data) examHistory.unshift(res.data);
   }
 
   async function loadClassData(){
@@ -522,20 +534,4 @@
       if(v !== undefined && v !== null && v !== "") vals.push(Number(v));
     });
     if(vals.length === 0) return { mean:null, high:null, low:null, count:0 };
-    var mean = vals.reduce(function(a,b){return a+b;},0) / vals.length;
-    return { mean:mean, high:Math.max.apply(null,vals), low:Math.min.apply(null,vals), count:vals.length };
-  }
-
-  function overallClassMean(){
-    var all = [];
-    classCache.students.forEach(function(st){ all = all.concat(studentMarksArray(st.id)); });
-    if(all.length === 0) return null;
-    return all.reduce(function(a,b){return a+b;},0) / all.length;
-  }
-
-  function autoRemark(avg){
-    var g = getGradeInfo(avg);
-    if(!g) return "No marks recorded yet.";
-    var cat = g.category || g.grade.slice(0,2);
-    if(cat === "EE") return "Exceeding Expectation. An outstanding grasp of the competencies covered.";
-    if(cat === "ME") return "Meeting Expectation. A g
+    var mean = vals.reduce(function(a,b){return a+b;
